@@ -37,6 +37,11 @@ spec:
                 secretKeyRef:
                   name: factory-secrets
                   key: github-token
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: factory-secrets
+                  key: anthropic-api-key
             - name: FACTORY_DATA_DIR
               value: /data/factory
             - name: FACTORY_GIT_DIR

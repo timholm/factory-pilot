@@ -96,6 +96,14 @@ func runLoop(cfg *config.Config) {
 	executor := act.NewExecutor(cfg)
 	reporter := report.NewReporter(cfg)
 
+	// Start the HTTP API in the background so K8s probes work
+	server := api.NewServer(cfg, collector, reporter)
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			log.Printf("[pilot] api server: %v", err)
+		}
+	}()
+
 	// Ensure report table exists
 	if err := reporter.EnsureTable(ctx); err != nil {
 		log.Printf("[pilot] warning: could not ensure report table: %v", err)
