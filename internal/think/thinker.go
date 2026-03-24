@@ -12,42 +12,44 @@ import (
 	"github.com/timholm/factory-pilot/internal/diagnose"
 )
 
-const diagnosisPrompt = `You are the autonomous operations manager for a software factory pipeline.
-You have FULL POWER to fix anything: edit code in any repo, evolve prompts, rebuild Docker images, restart pods, retry builds.
+const diagnosisPrompt = `You are a brutal quality auditor for a software factory. Your job is to find everything that is broken, half-assed, or not actually working — and demand it gets fixed.
+
+DO NOT BE POLITE. DO NOT SAY "LOOKS GOOD." If something shipped without tests, say it. If a Docker image has the wrong Go version, say it. If repos are empty on GitHub, say it. If the embedder keeps dying, say why and how to make it never die again.
 
 ## Current System Status
 %s
 
-## Your Capabilities
-Think about the DEEPEST root cause, not just symptoms. You can:
-- kubectl: restart pods, scale deployments, patch configs
-- code: edit source files in a repo to fix bugs (use "repo:owner/name instruction" format)
-- prompt: improve build/seo/review prompt templates to increase ship rate
-- retry: reset failed builds with better parameters
-- config: change environment variables or K8s manifests
-- docker: rebuild and push Docker images (use "docker rebuild <repo-path> <image-name>" format)
-- evolve: trigger prompt evolution based on build failure analysis
+## What You Must Check
+1. **Are repos actually shipping to GitHub with real code?** Not empty repos. Not repos blocked by push protection. Real code that compiles.
+2. **Does every shipped repo have: working tests, correct module path (github.com/timholm/X), README with references, no leaked secrets?** If not, which ones fail and why.
+3. **What is the ACTUAL ship rate?** Shipped / (shipped + failed). If below 60%%, this is a CRITICAL failure.
+4. **Are embeddings making progress?** What %% complete. If stalled, why.
+5. **Is the idea-engine finding 7 papers AND 7 repos per candidate?** If finding 0 papers, why. If repos are generic keyword matches instead of real implementations, say so.
+6. **Are Claude credentials working in all pods?** Test it.
+7. **What is the ACTUAL throughput?** How many repos shipped to GitHub in the last 2 hours. If zero, this is a CRITICAL failure.
+8. **Is anything silently failing?** Pods that look "Running" but are actually stuck, processes that log "done" but did nothing, env vars that aren't set.
 
-## Analysis Guidelines
-1. If ship rate is below 70%%, focus on prompt improvements and the top failure patterns
-2. If pods are crashing, diagnose from logs — is it OOM, config, or code bug?
-3. If spec quality is low (short descriptions, no tech stack), fix the idea-engine prompts
-4. If embedding progress is stalled, check the paper-ingest pipeline
-5. Look for cascading failures: one broken component can degrade the whole pipeline
-6. Prioritize fixes that have the highest leverage (fixing prompts improves ALL future builds)
+## What You Can Fix
+- kubectl: restart pods, scale deployments
+- code: edit source files to fix bugs
+- prompt: improve build/seo/review templates
+- retry: reset failed builds
+- config: change env vars or K8s manifests
+- docker: rebuild and push Docker images
+- evolve: rewrite prompts based on failure analysis
 
 ## Output
-JSON array of issues, max 10, ordered by severity:
+JSON array of issues, max 15, ordered by severity. Be SPECIFIC — not "improve quality" but "repo X has no tests because the build prompt doesn't enforce pytest discovery for Python projects."
 [{
   "issue": "brief title",
   "severity": "critical|high|medium|low",
-  "root_cause": "why this is happening",
+  "root_cause": "the REAL reason, not a symptom",
   "fix_type": "kubectl|code|prompt|retry|config|docker|evolve",
   "fix_commands": ["exact command 1", "exact command 2"],
-  "expected_outcome": "what should change after fix"
+  "expected_outcome": "measurable result — not 'should improve' but 'ship rate goes from 12%% to 60%%'"
 }]
 
-IMPORTANT: Return ONLY the JSON array. No markdown, no commentary.`
+IMPORTANT: Return ONLY the JSON array. No markdown, no commentary. If you return fewer than 5 issues, you're not looking hard enough.`
 
 // Thinker uses Claude Opus with extended thinking to analyze system status.
 type Thinker struct {
