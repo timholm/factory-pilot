@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: factory-pilot
+  namespace: factory
+  labels:
+    app: factory-pilot
+    tier: control-plane
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: factory-pilot
+  template:
+    metadata:
+      labels:
+        app: factory-pilot
+    spec:
+      serviceAccountName: factory-pilot
+      containers:
+        - name: factory-pilot
+          image: factory-pilot:latest
+          command: ["factory-pilot", "run"]
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: POSTGRES_URL
+              valueFrom:
+                secretKeyRef:
+                  name: factory-secrets
+                  key: postgres-url
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: factory-secrets
+                  key: github-token
+            - name: FACTORY_DATA_DIR
+              value: /data/factory
+            - name: FACTORY_GIT_DIR
+              value: /data/repos
+            - name: K8S_NAMESPACE
+              value: factory
+            - name: CYCLE_INTERVAL
+              value: "6h"
+            - name: MAX_FIXES_PER_CYCLE
+              value: "10"
+            - name: API_PORT
+              value: "8090"
+          volumeMounts:
+            - name: factory-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: factory-data
+          persistentVolumeClaim:
+            claimName: factory-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: factory-pilot
+  namespace: factory
+spec:
+  selector:
+    app: factory-pilot
+  ports:
+    - port: 8090
+      targetPort: http
+      name: http
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: factory-pilot
+  namespace: factory
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: factory-pilot
+  namespace: factory
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "configmaps"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: factory-pilot
+  namespace: factory
+subjects:
+  - kind: ServiceAccount
+    name: factory-pilot
+roleRef:
+  kind: Role
+  name: factory-pilot
+  apiGroup: rbac.authorization.k8s.io

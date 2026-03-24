@@ -1,0 +1,68 @@
+# factory-pilot
+
+> Autonomous improvement agent for the Claude Code Factory pipeline.
+
+factory-pilot runs a continuous diagnose-think-act-report loop to keep the software factory healthy without human intervention. Written in Go, deployed as a single Kubernetes pod.
+
+## What it does
+
+- Collects system health from Postgres (papers, candidates), SQLite (build registry), Kubernetes (pod status), GitHub API (repo metrics), and an in-cluster llm-router.
+- Sends the full status report to Claude Opus for root-cause analysis. Opus returns a severity-ranked list of issues with exact fix commands.
+- Executes fixes: kubectl operations (verb-whitelisted), code patches via Claude Code CLI, prompt template rewrites, and build retries.
+- Persists structured daily reports to Postgres and exposes them via HTTP API.
+
+## Key properties
+
+- Dry-run by default. Must pass --execute to apply fixes.
+- kubectl commands are verb-whitelisted (no delete, no exec, no --force) and namespace-locked to the factory namespace.
+- Max 10 fixes per cycle. Default cycle interval: 6 hours.
+- No UI. Backend-only agent.
+- Go 1.23, minimal dependencies. No frameworks, no ORM.
+
+## Structure
+
+- main.go: CLI entry point (run, diagnose, report, serve, version), improvement loop orchestration
+- internal/config/config.go: Environment-based configuration with sensible defaults
+- internal/diagnose/collector.go: Parallel health collection orchestrator
+- internal/diagnose/postgres.go: Paper ingestion and candidate pipeline stats
+- internal/diagnose/sqlite.go: Build registry stats and error pattern analysis
+- internal/diagnose/k8s.go: Pod health via kubectl
+- internal/diagnose/github.go: Repo metrics via GitHub API (go-github)
+- internal/diagnose/router.go: LLM router request stats
+- internal/think/thinker.go: Claude Opus analysis engine, prompt construction, JSON issue parsing
+- internal/think/types.go: Issue struct, severity ordering
+- internal/act/executor.go: Fix dispatcher routing by fix_type
+- internal/act/kubectl.go: Safe kubectl runner with verb whitelist and blocked patterns
+- internal/act/claude.go: Claude Code CLI runner for code and prompt fixes
+- internal/act/retry.go: SQLite build retry operations (single, all-failed, recent)
+- internal/report/report.go: Daily report generation, printing, persistence orchestration
+- internal/report/db.go: Postgres CRUD for pilot_reports table
+- internal/api/server.go: HTTP monitoring API
+- deploy/deployment.yaml: K8s Deployment, Service, ServiceAccount, Role, RoleBinding
+- Dockerfile: Multi-stage build (golang:1.23-alpine -> alpine:3.20)
+
+## API
+
+- GET /health — liveness probe, returns {"status":"ok"}
+- GET /status — live system status snapshot from all collectors
+- GET /reports — last 30 daily reports from Postgres
+- GET /reports/{date} — report by date (YYYY-MM-DD)
+- GET /issues — current issues from latest report
+
+## Configuration (env vars)
+
+- POSTGRES_URL — Postgres connection string (default: postgres://localhost:5432/factory?sslmode=disable)
+- FACTORY_DATA_DIR — SQLite build registry path (default: /data/factory)
+- FACTORY_GIT_DIR — local repo clone root (default: /data/repos)
+- GITHUB_TOKEN — GitHub PAT for repo stats
+- GITHUB_USER — GitHub username (default: timholm)
+- CLAUDE_BINARY — path to Claude CLI (default: claude)
+- K8S_NAMESPACE — target namespace (default: factory)
+- CYCLE_INTERVAL — loop interval (default: 6h)
+- MAX_FIXES_PER_CYCLE — fix cap per cycle (default: 10)
+- API_PORT — HTTP listen port (default: 8090)
+
+## Detailed docs
+
+- CLAUDE.md: design constraints and coding conventions for AI agents modifying this codebase
+- AGENTS.md: agent coordination, data flow contracts, and extension guide

@@ -1,0 +1,10 @@
+factory-pilot
+*.exe
+*.test
+*.out
+.env
+.env.*
+*.db
+coverage.out
+dist/
+tmp/
