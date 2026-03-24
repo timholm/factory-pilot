@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // RetryRunner resets failed builds and re-queues them.
@@ -31,7 +31,7 @@ func (r *RetryRunner) Run(command string) (string, error) {
 	}
 
 	dbPath := filepath.Join(r.dataDir, "factory.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return "", fmt.Errorf("open factory db: %w", err)
 	}

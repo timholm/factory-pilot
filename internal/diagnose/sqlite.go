@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // SQLiteCollector queries the factory build registry (SQLite).
@@ -26,7 +26,7 @@ func (s *SQLiteCollector) dbPath() string {
 
 // CollectBuilds returns build pipeline statistics from the factory registry.
 func (s *SQLiteCollector) CollectBuilds(ctx context.Context) (BuildStats, error) {
-	db, err := sql.Open("sqlite3", s.dbPath()+"?mode=ro")
+	db, err := sql.Open("sqlite", s.dbPath()+"?mode=ro")
 	if err != nil {
 		return BuildStats{}, fmt.Errorf("open sqlite: %w", err)
 	}

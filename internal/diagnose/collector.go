@@ -7,19 +7,30 @@ import (
 	"sync"
 	"time"
 
+	"github.com/timholm/factory-pilot/internal/analyze"
 	"github.com/timholm/factory-pilot/internal/config"
 )
 
 // SystemStatus is the full health snapshot of the entire factory pipeline.
 type SystemStatus struct {
-	Timestamp  time.Time      `json:"timestamp"`
-	Papers     PaperStats     `json:"papers"`
-	Candidates CandidateStats `json:"candidates"`
-	BuildQueue BuildStats     `json:"build_queue"`
-	Pods       []PodStatus    `json:"pods"`
-	Router     RouterStats    `json:"router"`
-	GitHub     GitHubStats    `json:"github"`
-	Errors     []string       `json:"errors"`
+	Timestamp     time.Time              `json:"timestamp"`
+	Papers        PaperStats             `json:"papers"`
+	Candidates    CandidateStats         `json:"candidates"`
+	BuildQueue    BuildStats             `json:"build_queue"`
+	BuildAnalysis *analyze.BuildReport   `json:"build_analysis,omitempty"`
+	Pods          []PodStatus            `json:"pods"`
+	Router        RouterStats            `json:"router"`
+	GitHub        GitHubStats            `json:"github"`
+	SpecQuality   SpecQualityStats       `json:"spec_quality"`
+	Errors        []string               `json:"errors"`
+}
+
+// SpecQualityStats tracks idea-engine spec quality from recent candidates.
+type SpecQualityStats struct {
+	RecentSpecs    int     `json:"recent_specs"`
+	AvgDescLength  float64 `json:"avg_desc_length"`
+	WithTechStack  int     `json:"with_tech_stack"`
+	WithUseCases   int     `json:"with_use_cases"`
 }
 
 // PaperStats tracks research paper ingestion.
@@ -197,6 +208,35 @@ func (c *Collector) Collect(ctx context.Context) *SystemStatus {
 		mu.Unlock()
 	}()
 
+	// Build analysis: ship rate, failure patterns, language breakdown
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dbPath := c.sqlite.dbPath()
+		report, err := analyze.AnalyzeBuilds(dbPath)
+		if err != nil {
+			addError("build_analysis", err.Error())
+			return
+		}
+		mu.Lock()
+		status.BuildAnalysis = report
+		mu.Unlock()
+	}()
+
+	// Spec quality: check recent candidates in Postgres
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		specQuality, err := c.pg.CollectSpecQuality(ctx)
+		if err != nil {
+			addError("spec_quality", err.Error())
+			return
+		}
+		mu.Lock()
+		status.SpecQuality = specQuality
+		mu.Unlock()
+	}()
+
 	wg.Wait()
 	return status
 }
@@ -271,6 +311,17 @@ func FormatReport(s *SystemStatus) string {
 		}
 	}
 	b.WriteString("\n")
+
+	if s.BuildAnalysis != nil {
+		b.WriteString(s.BuildAnalysis.FormatForThinker())
+		b.WriteString("\n")
+	}
+
+	b.WriteString("## Spec Quality (Recent Candidates)\n")
+	b.WriteString(fmt.Sprintf("- Recent specs: %d\n", s.SpecQuality.RecentSpecs))
+	b.WriteString(fmt.Sprintf("- Avg description length: %.0f chars\n", s.SpecQuality.AvgDescLength))
+	b.WriteString(fmt.Sprintf("- With tech stack: %d\n", s.SpecQuality.WithTechStack))
+	b.WriteString(fmt.Sprintf("- With use cases: %d\n\n", s.SpecQuality.WithUseCases))
 
 	b.WriteString("## GitHub\n")
 	b.WriteString(fmt.Sprintf("- Repos: %d\n", s.GitHub.RepoCount))

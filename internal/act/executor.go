@@ -100,6 +100,10 @@ func (e *Executor) executeOne(issue think.Issue) ActionResult {
 			out, err = e.retry.Run(cmd)
 		case "config":
 			out, err = e.kubectl.Run(cmd) // config changes go through kubectl
+		case "docker":
+			out, err = e.runDockerFix(cmd)
+		case "evolve":
+			out, err = e.runEvolveFix(cmd)
 		default:
 			err = fmt.Errorf("unknown fix type: %s", issue.FixType)
 		}
@@ -116,4 +120,24 @@ func (e *Executor) executeOne(issue think.Issue) ActionResult {
 	result.Output = strings.Join(outputs, "\n")
 	result.Duration = time.Since(start).String()
 	return result
+}
+
+// runDockerFix handles "docker rebuild <repo-path> <image-name>" commands.
+func (e *Executor) runDockerFix(command string) (string, error) {
+	parts := strings.Fields(command)
+	if len(parts) < 3 || parts[0] != "docker" || parts[1] != "rebuild" {
+		return "", fmt.Errorf("invalid docker command format, expected: docker rebuild <repo-path> <image-name>")
+	}
+	repoPath := parts[2]
+	imageName := parts[3]
+	if err := RebuildImage(repoPath, imageName); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("rebuilt and pushed ghcr.io/timholm/%s:latest", imageName), nil
+}
+
+// runEvolveFix handles prompt evolution commands.
+func (e *Executor) runEvolveFix(command string) (string, error) {
+	// Evolve commands just trigger prompt improvement via Claude
+	return e.claude.RunPromptFix(command)
 }

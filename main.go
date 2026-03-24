@@ -6,10 +6,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/timholm/factory-pilot/internal/act"
+	"github.com/timholm/factory-pilot/internal/analyze"
 	"github.com/timholm/factory-pilot/internal/api"
 	"github.com/timholm/factory-pilot/internal/config"
 	"github.com/timholm/factory-pilot/internal/diagnose"
@@ -47,6 +49,12 @@ func main() {
 		runReport(cfg)
 	case "serve":
 		runServe(cfg)
+	case "analyze":
+		runAnalyze(cfg)
+	case "evolve":
+		runEvolve(cfg)
+	case "fix-code":
+		runFixCode(cfg)
 	case "version":
 		fmt.Printf("factory-pilot %s\n", version)
 	default:
@@ -66,6 +74,10 @@ Commands:
   diagnose   Run one diagnosis cycle and print results
   report     Print the latest daily report
   serve      Start the HTTP monitoring API
+  analyze    Analyze build outcomes (ship rate, failure patterns)
+  evolve     Analyze builds + evolve prompt templates
+  fix-code   Clone a repo and fix it with Claude
+               --repo <name>   GitHub repo name (e.g. "my-tool")
 
 Flags:
   --execute  Actually apply fixes (default is dry-run)
@@ -138,7 +150,7 @@ func runCycle(
 	cycleStart := time.Now()
 	log.Println("[cycle] === starting improvement cycle ===")
 
-	// 1. DIAGNOSE
+	// 1. COLLECT system status (pods, Postgres, SQLite, router, GitHub)
 	log.Println("[cycle] collecting system status...")
 	status := collector.Collect(ctx)
 	log.Printf("[cycle] diagnosis complete: %d errors during collection", len(status.Errors))
@@ -146,7 +158,16 @@ func runCycle(
 		log.Printf("[cycle]   %s", e)
 	}
 
-	// 2. THINK
+	// 2. ANALYZE builds (ship rate, failure patterns) — already included in status via collector
+	if status.BuildAnalysis != nil {
+		log.Printf("[cycle] build analysis: ship_rate=%.1f%% shipped=%d failed=%d patterns=%d",
+			status.BuildAnalysis.ShipRate*100,
+			status.BuildAnalysis.ShippedCount,
+			status.BuildAnalysis.FailedCount,
+			len(status.BuildAnalysis.FailureGroups))
+	}
+
+	// 3. THINK — send EVERYTHING to Opus for deep analysis
 	log.Println("[cycle] analyzing with Claude Opus...")
 	issues, err := thinker.Analyze(status)
 	if err != nil {
@@ -162,11 +183,11 @@ func runCycle(
 	}
 	log.Printf("[cycle] found %d issues", len(issues))
 
-	// 3. ACT
+	// 4. ACT — execute fixes (kubectl, code edits, prompt evolution, docker rebuilds)
 	log.Println("[cycle] executing fixes...")
 	actions := executor.Execute(issues)
 
-	// 4. REPORT
+	// 5. REPORT
 	rep := reporter.Generate(status, issues, actions)
 	if err := reporter.Save(ctx, rep); err != nil {
 		log.Printf("[cycle] ERROR: could not save report: %v", err)
@@ -211,4 +232,87 @@ func runServe(cfg *config.Config) {
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("server: %v", err)
 	}
+}
+
+// runAnalyze runs build analysis and prints the report.
+func runAnalyze(cfg *config.Config) {
+	dbPath := filepath.Join(cfg.FactoryDataDir, "factory.db")
+
+	report, err := analyze.AnalyzeBuilds(dbPath)
+	if err != nil {
+		log.Fatalf("analyze: %v", err)
+	}
+
+	fmt.Println(report.String())
+}
+
+// runEvolve runs build analysis + prompt evolution.
+func runEvolve(cfg *config.Config) {
+	dbPath := filepath.Join(cfg.FactoryDataDir, "factory.db")
+
+	log.Println("[evolve] analyzing builds...")
+	buildReport, err := analyze.AnalyzeBuilds(dbPath)
+	if err != nil {
+		log.Fatalf("analyze: %v", err)
+	}
+
+	fmt.Println(buildReport.String())
+
+	factoryRepoPath := filepath.Join(cfg.FactoryGitDir, "claude-code-factory")
+
+	log.Println("[evolve] evolving prompts...")
+	if err := act.EvolvePrompts(buildReport, factoryRepoPath, cfg.ClaudeBinary); err != nil {
+		log.Fatalf("evolve: %v", err)
+	}
+
+	log.Println("[evolve] prompts evolved and pushed successfully")
+}
+
+// runFixCode clones a repo and fixes it with Claude.
+func runFixCode(cfg *config.Config) {
+	var repoName string
+	var prompt string
+
+	// Parse --repo flag
+	for i, arg := range os.Args[2:] {
+		if arg == "--repo" && i+1 < len(os.Args[2:])-1 {
+			repoName = os.Args[2+i+1]
+		}
+	}
+
+	if repoName == "" {
+		fmt.Fprintln(os.Stderr, "Usage: factory-pilot fix-code --repo <name> [prompt]")
+		fmt.Fprintln(os.Stderr, "Example: factory-pilot fix-code --repo my-tool 'fix the failing tests'")
+		os.Exit(1)
+	}
+
+	// Remaining args after --repo <name> are the prompt
+	args := os.Args[2:]
+	var remaining []string
+	skip := false
+	for _, arg := range args {
+		if arg == "--repo" {
+			skip = true
+			continue
+		}
+		if skip {
+			skip = false
+			continue
+		}
+		remaining = append(remaining, arg)
+	}
+	if len(remaining) > 0 {
+		prompt = remaining[0]
+	} else {
+		prompt = "Fix all issues: ensure go build ./... and go test ./... pass, fix lint issues, ensure proper error handling."
+	}
+
+	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", cfg.GithubUser, repoName)
+
+	log.Printf("[fix-code] cloning %s and applying fix...", repoURL)
+	if err := act.CloneAndFix(repoURL, prompt, cfg.ClaudeBinary); err != nil {
+		log.Fatalf("fix-code: %v", err)
+	}
+
+	log.Println("[fix-code] fix applied and pushed successfully")
 }

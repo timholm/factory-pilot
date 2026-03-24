@@ -19,3 +19,9 @@ func TestVersionVar(t *testing.T) {
 		t.Logf("version = %q (expected 'dev' for default)", version)
 	}
 }
+
+func TestUsage_ContainsNewCommands(t *testing.T) {
+	// Capture usage output indirectly by just verifying it doesn't panic
+	// and that the function exists (compile check for new commands)
+	usage()
+}

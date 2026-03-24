@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/timholm/factory-pilot/internal/analyze"
 	"github.com/timholm/factory-pilot/internal/config"
 )
 
@@ -154,7 +155,8 @@ func TestFormatReport_ZeroValues(t *testing.T) {
 		Router: RouterStats{
 			ModelCounts: map[string]int{},
 		},
-		Errors: []string{},
+		SpecQuality: SpecQualityStats{},
+		Errors:      []string{},
 	}
 
 	report := FormatReport(status)
@@ -329,6 +331,67 @@ func TestNewRouterCollector(t *testing.T) {
 	}
 	if r.client == nil {
 		t.Error("client should not be nil")
+	}
+}
+
+func TestSpecQualityStats_Fields(t *testing.T) {
+	stats := SpecQualityStats{
+		RecentSpecs:   10,
+		AvgDescLength: 250.5,
+		WithTechStack: 7,
+		WithUseCases:  5,
+	}
+	if stats.RecentSpecs != 10 {
+		t.Errorf("RecentSpecs = %d, want 10", stats.RecentSpecs)
+	}
+	if stats.AvgDescLength != 250.5 {
+		t.Errorf("AvgDescLength = %f, want 250.5", stats.AvgDescLength)
+	}
+	if stats.WithTechStack != 7 {
+		t.Errorf("WithTechStack = %d, want 7", stats.WithTechStack)
+	}
+	if stats.WithUseCases != 5 {
+		t.Errorf("WithUseCases = %d, want 5", stats.WithUseCases)
+	}
+}
+
+func TestFormatReport_WithBuildAnalysis(t *testing.T) {
+	report := &analyze.BuildReport{
+		TotalBuilds:   50,
+		ShippedCount:  35,
+		FailedCount:   15,
+		ShipRate:      0.7,
+		LanguageBreak: map[string]int{"go": 45, "rust": 5},
+		ShippedTraits: analyze.ShippedTraits{
+			TestRate:   0.85,
+			ReadmeRate: 0.9,
+		},
+		FailureGroups: []analyze.FailureGroup{
+			{Pattern: "compilation_error", Count: 8, Percentage: 0.533, Desc: "Code failed to compile"},
+		},
+	}
+
+	status := &SystemStatus{
+		Timestamp:     time.Now().UTC(),
+		BuildAnalysis: report,
+		SpecQuality: SpecQualityStats{
+			RecentSpecs:   12,
+			AvgDescLength: 300,
+			WithTechStack: 8,
+			WithUseCases:  6,
+		},
+		Errors: []string{},
+	}
+
+	formatted := FormatReport(status)
+	if !strings.Contains(formatted, "Ship rate: 70.0%") {
+		t.Error("should contain ship rate from build analysis")
+	}
+	if !strings.Contains(formatted, "Spec Quality") {
+		t.Error("should contain spec quality section")
+	}
+	if !strings.Contains(formatted, "Recent specs: 12") {
+		t.Error("should contain recent specs count")
 	}
 }
 

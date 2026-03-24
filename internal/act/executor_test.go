@@ -114,7 +114,7 @@ func TestExecutor_DryRun_AllFixTypes(t *testing.T) {
 
 	executor := NewExecutor(cfg)
 
-	fixTypes := []string{"kubectl", "code", "prompt", "retry", "config"}
+	fixTypes := []string{"kubectl", "code", "prompt", "retry", "config", "docker", "evolve"}
 	for _, ft := range fixTypes {
 		t.Run(ft, func(t *testing.T) {
 			issues := []think.Issue{

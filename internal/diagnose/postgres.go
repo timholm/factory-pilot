@@ -90,3 +90,47 @@ func (p *PostgresCollector) CollectCandidates(ctx context.Context) (CandidateSta
 
 	return stats, nil
 }
+
+// CollectSpecQuality returns quality metrics for recent candidate specs.
+func (p *PostgresCollector) CollectSpecQuality(ctx context.Context) (SpecQualityStats, error) {
+	conn, err := pgx.Connect(ctx, p.connStr)
+	if err != nil {
+		return SpecQualityStats{}, fmt.Errorf("postgres connect: %w", err)
+	}
+	defer conn.Close(ctx)
+
+	var stats SpecQualityStats
+
+	// Count recent specs and average description length.
+	err = conn.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(AVG(LENGTH(description)), 0)
+		FROM candidates
+		WHERE created_at > NOW() - INTERVAL '7 days'
+	`).Scan(&stats.RecentSpecs, &stats.AvgDescLength)
+	if err != nil {
+		// Table might not have description column — non-fatal.
+		return stats, nil
+	}
+
+	// Count specs with tech stack info.
+	err = conn.QueryRow(ctx, `
+		SELECT COUNT(*) FROM candidates
+		WHERE created_at > NOW() - INTERVAL '7 days'
+		AND (description ILIKE '%tech%' OR description ILIKE '%stack%' OR description ILIKE '%language%' OR description ILIKE '%framework%')
+	`).Scan(&stats.WithTechStack)
+	if err != nil {
+		return stats, nil
+	}
+
+	// Count specs with use cases.
+	err = conn.QueryRow(ctx, `
+		SELECT COUNT(*) FROM candidates
+		WHERE created_at > NOW() - INTERVAL '7 days'
+		AND (description ILIKE '%use case%' OR description ILIKE '%user%' OR description ILIKE '%scenario%')
+	`).Scan(&stats.WithUseCases)
+	if err != nil {
+		return stats, nil
+	}
+
+	return stats, nil
+}
